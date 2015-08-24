@@ -39,14 +39,11 @@ add_definitions( -DGZSERVER_BIN="${GZSERVER_BIN}")
 
 #------------------------------------------------------
 set( HDRS 
-  gazebo.h
   helpers.h
 )
 
 set( SRCS 
-  gazebo.cpp
   helpers.cpp
-  plugin.cpp
 )
 
 set( LIBS
@@ -62,7 +59,7 @@ add_library( ${PROJECT_NAME} SHARED ${HDRS} ${SRCS} )
 add_dependencies( ${PROJECT_NAME} ${LIBS} )
 target_link_libraries( ${PROJECT_NAME} ${LIBS} )
 
-add_library( ${PROJECT_NAME}_driver "MODULE" ${HDRS} ${SRCS} )
+add_library( ${PROJECT_NAME}_driver "MODULE" driver.cpp ${HDRS} ${SRCS} )
 add_dependencies( ${PROJECT_NAME}_driver ${LIBS} )
 target_link_libraries( ${PROJECT_NAME}_driver ${LIBS} )
 

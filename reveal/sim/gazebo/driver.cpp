@@ -1,4 +1,13 @@
-#include "gazebo.h"
+//#include "gazebo.h"
+
+#include <string>
+#include <vector>
+
+#include <boost/shared_ptr.hpp>
+
+#include "reveal/core/ipc.h"
+#include "reveal/core/simulator.h"
+#include "reveal/core/package.h"
 
 #include <signal.h>
 
@@ -18,27 +27,30 @@
 #define GZENVAR_PLUGIN_PATH "GAZEBO_PLUGIN_PATH"
 #define GZENVAR_MODEL_PATH "GAZEBO_MODEL_PATH"
 //-----------------------------------------------------------------------------
-namespace Reveal {
-//-----------------------------------------------------------------------------
-namespace Sim {
-//-----------------------------------------------------------------------------
-gazebo_c::gazebo_c( void ) {
-  _request_trial = NULL;
-  _submit_solution = NULL;
-  _ipc_context = NULL;
-}
-/*
-//-----------------------------------------------------------------------------
-gazebo_c::gazebo_c( request_trial_f request_trial, submit_solution_f submit_solution, void* ipc_context ) {
-  _request_trial = request_trial;
-  _submit_solution = submit_solution;
-  _ipc_context = ipc_context;
-}
-*/
-//-----------------------------------------------------------------------------
-gazebo_c::~gazebo_c( void ) { 
+/// Enumerated list of possible dynamics engines in gazebo
+enum dynamics_e {
+  DYNAMICS_ODE,
+  DYNAMICS_BULLET,
+  DYNAMICS_DART,
+  DYNAMICS_SIMBODY
+};
 
-}
+
+Reveal::Core::package_ptr _package; //< the package (scenario) being simulated
+
+Reveal::Core::simulator_c::submit_solution_f _submit_solution; //< the submit solution function
+Reveal::Core::simulator_c::request_trial_f _request_trial;     //< the request trial function
+void* _ipc_context;                 //< the shared communication context
+
+dynamics_e _dynamics;               //< the dynamics the simulator is using
+std::string _world_path;            //< the path to the gazebo world file
+std::string _model_path;            //< the path to the model files
+std::string _plugin_path;           //< the path to the gazebo plugins
+
+std::string _controller_path;
+std::string _monitor_path;
+
+Reveal::Core::pipe_ptr _ipc;        //< the pipe to the gazebo world plugin
 
 //-----------------------------------------------------------------------------
 // Signal Handling : Gazebo process exit detection and 
@@ -48,14 +60,14 @@ bool gz_exited;  // exit condition variable for signal handling
 // Note: only one instance of gzserver can run at a time at present, so having
 // a static function tied to a global variable for the signal handler is not
 // a major issue as of right now.
-void gazebo_c::exit_sighandler( int signum ) {
+void exit_sighandler( int signum ) {
   // update exit condition variable
   gz_exited = true;
   assert( signum );  // to suppress compiler warning of unused variable
 }
 
 //-----------------------------------------------------------------------------
-std::vector< std::string > gazebo_c::environment_keys( void ) {
+std::vector< std::string > environment_keys( void ) {
   std::vector< std::string > enkeys;
   enkeys.push_back( "HOME" );
   enkeys.push_back( "LD_LIBRARY_PATH" );
@@ -69,7 +81,7 @@ std::vector< std::string > gazebo_c::environment_keys( void ) {
 }
 
 //-----------------------------------------------------------------------------
-gazebo_c::dynamics_e gazebo_c::prompt_dynamics( void ) {
+dynamics_e prompt_dynamics( void ) {
 
   std::vector< std::string > list;
   list.push_back( "ODE" );
@@ -93,12 +105,13 @@ gazebo_c::dynamics_e gazebo_c::prompt_dynamics( void ) {
 }
 
 //-----------------------------------------------------------------------------
-void gazebo_c::print_tuning_menu( void ) {
+void print_tuning_menu( void ) {
   printf( "- Tuning Menu -\n" );
   //printf( "TODO\n" );
   printf( "This is a placeholder for future expansion.  Tuning can be currently accomplished by modifying the relevant package as defined by the $REVEAL_PACKAGE_PATH environment variable.  This menu is provided as a hint that an interactive (and restricted) tuning environment can be supported if desired.\n" );
 }
-/*
+
+
 //-----------------------------------------------------------------------------
 // simulator plugin interface implementation
 //-----------------------------------------------------------------------------
@@ -106,14 +119,17 @@ extern "C" {
 //-----------------------------------------------------------------------------
 
 //-----------------------------------------------------------------------------
-bool gazebo_c::ui_select_configuration( Reveal::Core::scenario_ptr scenario, Reveal::Core::experiment_ptr experiment ) {
+bool ui_select_configuration( Reveal::Core::scenario_ptr scenario, Reveal::Core::experiment_ptr experiment ) {
+  assert( scenario );          // To suppress unused parameter warning
+  assert( experiment );          // To suppress unused parameter warning
+
   _dynamics = prompt_dynamics();
 
   return true; 
 }
 
 //-----------------------------------------------------------------------------
-bool gazebo_c::ui_select_tuning( void ) {
+bool ui_select_tuning( void ) {
   if( Reveal::Core::console_c::prompt_yes_no( "Would you like to tune the experiment (Y/N)?" ) )
     print_tuning_menu();
 
@@ -121,10 +137,16 @@ bool gazebo_c::ui_select_tuning( void ) {
 }
 
 //-----------------------------------------------------------------------------
-bool gazebo_c::build_package( std::string src_path, std::string build_path ) {
+bool build_package( std::string src_path, std::string build_path, std::string include_path, std::string library_path, std::string library_name ) {
+  std::vector<std::string> args;
+  args.push_back( "-DREVEAL_SIM_INCLUDE=" + include_path );
+  args.push_back( "-DREVEAL_SIM_LIBRARY=" + combine_path( library_path, library_name ) );
 
-  _plugin_path = combine_path( build_path, "gazebo" );
+  //_plugin_path = combine_path( build_path, "gazebo" );
+  //_plugin_path = build_path;
   _model_path = build_path;
+  _controller_path = build_path;
+  _monitor_path = library_path;
 
   const bool USE_SDF = true;
   _model_path = combine_path( build_path, "models" );
@@ -133,10 +155,10 @@ bool gazebo_c::build_package( std::string src_path, std::string build_path ) {
   } else {
     _model_path = combine_path( _model_path, "urdf" );
   }
-
+/*
   Reveal::Core::console_c::printline( src_path );
   Reveal::Core::console_c::printline( build_path );
-
+*/
   // build package
   _package = Reveal::Core::package_ptr( new Reveal::Core::package_c( src_path, build_path ) );
 
@@ -162,7 +184,7 @@ bool gazebo_c::build_package( std::string src_path, std::string build_path ) {
   }
 
   // configure package
-  bool cmake_result = _package->configure();
+  bool cmake_result = _package->configure( args );
   if( !cmake_result ) {
     printf( "ERROR: Failed to configure make for experimental package\nExiting\n" );
     return false;
@@ -170,6 +192,12 @@ bool gazebo_c::build_package( std::string src_path, std::string build_path ) {
     printf( "Package configuration succeeded\n" );
   }
 
+/*
+  printf( "build_products:\n" );
+  for( unsigned i = 0; i < build_products.size(); i++ ) {
+    printf( "%s\n", build_products[i].c_str() );
+  }
+*/
   // build package
   bool make_result = _package->make( build_products );
   if( !make_result ) {
@@ -182,7 +210,7 @@ bool gazebo_c::build_package( std::string src_path, std::string build_path ) {
 }
 
 //-----------------------------------------------------------------------------
-bool gazebo_c::execute( Reveal::Core::authorization_ptr auth, Reveal::Core::scenario_ptr scenario, Reveal::Core::experiment_ptr experiment ) {
+bool execute( Reveal::Core::authorization_ptr auth, Reveal::Core::scenario_ptr scenario, Reveal::Core::experiment_ptr experiment ) {
 
 //  scenario->print();
 //  printf( "eps[%1.24f]\n", experiment->epsilon );
@@ -236,13 +264,13 @@ bool gazebo_c::execute( Reveal::Core::authorization_ptr auth, Reveal::Core::scen
 
     std::string dynamics_param;
     switch( _dynamics ) {
-    case Reveal::Sim::gazebo_c::DYNAMICS_ODE:
+    case DYNAMICS_ODE:
       dynamics_param = "ode";         break;
-    case Reveal::Sim::gazebo_c::DYNAMICS_BULLET:
+    case DYNAMICS_BULLET:
       dynamics_param = "bullet";      break;
-    case Reveal::Sim::gazebo_c::DYNAMICS_DART:
+    case DYNAMICS_DART:
       dynamics_param = "dart";        break;
-    case Reveal::Sim::gazebo_c::DYNAMICS_SIMBODY:
+    case DYNAMICS_SIMBODY:
       dynamics_param = "simbody";     break;
     }
 
@@ -262,8 +290,12 @@ bool gazebo_c::execute( Reveal::Core::authorization_ptr auth, Reveal::Core::scen
     std::vector<std::string> env_strings = system_environment_vars();
     bool found_plugin_path = false;
     bool found_model_path = false;
-    bool found_package_path = false;
-
+/*
+    //printf( "plugin_path: %s\n", _plugin_path.c_str() );
+    printf( "model_path: %s\n", _model_path.c_str() );
+    printf( "monitor_path: %s\n", _monitor_path.c_str() );
+    printf( "controller_path: %s\n", _controller_path.c_str() );
+*/
     // search the environment variable array for gazebo environment variables
     // and override them if they exist
     for( std::vector<std::string>::iterator it = env_strings.begin(); it != env_strings.end(); it++ ) {
@@ -281,7 +313,9 @@ bool gazebo_c::execute( Reveal::Core::authorization_ptr auth, Reveal::Core::scen
           r = it->substr( search_val.size()+1 ).c_str();
           std::stringstream ss;
           ss << search_val << '=';
-          ss << _plugin_path << ":";
+          //ss << _plugin_path << ":";
+          ss << _monitor_path << ":";
+          ss << _controller_path << ":";
           ss << r;
           *it = ss.str();
         //}
@@ -307,7 +341,10 @@ bool gazebo_c::execute( Reveal::Core::authorization_ptr auth, Reveal::Core::scen
     if( !found_plugin_path ) {
       // plugin path envar does not exist, so create it
       std::stringstream ss;
-      ss << GZENVAR_PLUGIN_PATH << "=" << _plugin_path;
+      //ss << GZENVAR_PLUGIN_PATH << "=" << _plugin_path;
+      ss << GZENVAR_PLUGIN_PATH << "=" << _monitor_path;
+      ss << ":";
+      ss << GZENVAR_PLUGIN_PATH << "=" << _controller_path;
       env_strings.push_back( ss.str() );
     }
     if( !found_model_path ) {
@@ -509,9 +546,11 @@ bool gazebo_c::execute( Reveal::Core::authorization_ptr auth, Reveal::Core::scen
                 Reveal::Core::console_c::printline( "submit_solution failed" );
               }
             }
-//          } else {
-//            // the solution is effectively ignored until the simulator has reached
-//            // the desired trial_end_time
+/*
+          } else {
+            // the solution is effectively ignored until the simulator has reached
+            // the desired trial_end_time
+*/
           }
         }
       }  // end process response block
@@ -519,6 +558,7 @@ bool gazebo_c::execute( Reveal::Core::authorization_ptr auth, Reveal::Core::scen
       // Theoretically branch will not be entered; however, detecting EINTR is 
       // not fully reliable and this branch is here to ensure exit if the zmq
       // approach fails to cause exit.
+      // Note: this is still wonky and doesn't always work
       if( gz_exited ) {
         printf( "Detected Gazebo Exit\n" );
         break;
@@ -541,25 +581,20 @@ bool gazebo_c::execute( Reveal::Core::authorization_ptr auth, Reveal::Core::scen
 
 }
 //-----------------------------------------------------------------------------
-void gazebo_c::set_request_trial( request_trial_f request_trial ) {
+void set_request_trial( Reveal::Core::simulator_c::request_trial_f request_trial ) {
   _request_trial = request_trial;
 }
 
 //-----------------------------------------------------------------------------
-void gazebo_c::set_submit_solution( submit_solution_f submit_solution ) {
+void set_submit_solution( Reveal::Core::simulator_c::submit_solution_f submit_solution ) {
   _submit_solution = submit_solution;
 }
 //-----------------------------------------------------------------------------
-void gazebo_c::set_ipc_context( void* context ) {
+void set_ipc_context( void* context ) {
   _ipc_context = context;
 }
 
 //-----------------------------------------------------------------------------
 } // extern "C"
 //-----------------------------------------------------------------------------
-*/
-//-----------------------------------------------------------------------------
-} // Sim
-//-----------------------------------------------------------------------------
-} // Reveal
-//-----------------------------------------------------------------------------
+
