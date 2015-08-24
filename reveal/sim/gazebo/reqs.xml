@@ -1,0 +1,4 @@
+<?xml version="1.0" ?>
+<Reveal>
+  <Sim id="gazebo" name="Gazebo" bin="gzserver" />
+</Reveal>
