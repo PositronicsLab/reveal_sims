@@ -18,7 +18,6 @@
 
 #include <reveal/samples/exchange.h>
 
-//#include <reveal/sim/gazebo/helpers.h>
 #include "helpers.h"
 
 
@@ -54,7 +53,9 @@ private:
   /// reveal client
   Reveal::Core::pipe_ptr            _revealpipe;
 
-  std::vector<std::string> _model_list;
+  std::vector<std::string>          _model_list;
+
+  std::vector<Reveal::Core::model_ptr>  _filters;
 
   //---------------------------------------------------------------------------
   /// Opens the interprocess communication pipe to the reveal client
@@ -119,7 +120,6 @@ protected:
     std::string models = sdf->GetElement( "models" )->GetValueString();
     _model_list = split_multipart_string( models, "," );
 
-
     // read the experiment from the client connection
     Reveal::Samples::exchange_c ex;
     std::string msg;
@@ -166,7 +166,8 @@ protected:
     if( ex.get_type() == Reveal::Samples::exchange_c::TYPE_TRIAL ) {
       // if the message contains trial data, write trial to the simulator
       _trial = ex.get_trial();
-      Reveal::Sim::Gazebo::helpers_c::write_trial( _trial, _experiment, _world );
+
+      Reveal::Sim::Gazebo::helpers_c::write_trial( _trial, _experiment, _world, _filters );
     } else if( ex.get_type() == Reveal::Samples::exchange_c::TYPE_STEP ) {
       // otherwise, if the reveal client sent a step command, let the sim run
     } else if( ex.get_type() == Reveal::Samples::exchange_c::TYPE_EXIT ) {
