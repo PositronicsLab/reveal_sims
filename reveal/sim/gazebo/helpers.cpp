@@ -129,8 +129,7 @@ Reveal::Core::model_ptr helpers_c::read_model( gazebo::physics::WorldPtr world, 
   if( !gzmodel ) return rvlmodel;
   
   // otherwise, start mapping the model
-  rvlmodel = Reveal::Core::model_ptr( new Reveal::Core::model_c() );
-  rvlmodel->id = model_name;
+  rvlmodel = Reveal::Core::model_ptr( new Reveal::Core::model_c( model_name ) );
 
   // iterate through the filter and grab only the values defined by the filter 
   for( unsigned i = 0; i < filter->links.size(); i++ ) {
@@ -197,87 +196,6 @@ Reveal::Core::model_ptr helpers_c::read_model( gazebo::physics::WorldPtr world, 
 
   // return the reveal model
   return rvlmodel;
-/*
-  Reveal::Core::model_ptr rvlmodel;
-  // attempt to find the model in the gazebo world
-  gazebo::physics::ModelPtr gzmodel = world->GetModel( model_name );
-
-  // if gazebo could not find the model, return a reveal model null reference
-  if( !gzmodel ) return rvlmodel;
-
-  // otherwise, start mapping the model
-  rvlmodel = Reveal::Core::model_ptr( new Reveal::Core::model_c() );
-  rvlmodel->id = model_name;
-
-  //printf( "reading links\n" );
-  // get all the links in the gazebo model and iterate through them
-  gazebo::physics::Link_V gzlinks = gzmodel->GetLinks();
-  for( unsigned i = 0; i < gzlinks.size(); i++ ) {
-
-    // create a new reveal link and assign the correlating properties to it
-    Reveal::Core::link_ptr link( new Reveal::Core::link_c() );
-    link->id = gzlinks[i]->GetName();
-
-    // map the gazebo link state parameters into the reveal link
-    pose( gzlinks[i]->GetWorldPose(), link->state );
-    linear_velocity( gzlinks[i]->GetWorldLinearVel(), link->state );
-    angular_velocity( gzlinks[i]->GetWorldAngularVel(), link->state );
-
-    // insert the link into the reveal model
-    rvlmodel->insert( link );
-    //rvlmodel->push_back( link );
-  }
-
-  //printf( "reading joints\n" );
-  // get all the joints in the gazebo model and iterate through them
-  gazebo::physics::Joint_V gzjoints = gzmodel->GetJoints();
-  for( unsigned i = 0; i < gzjoints.size(); i++ ) {
-    gazebo::physics::JointPtr gzjoint = gzjoints[i];
-   
-    // read the joint identifier from gazebo
-    std::string id = gzjoint->GetName();
-
-    // create a reveal joint and assign it the name and control
-    Reveal::Core::joint_ptr rvljoint( new Reveal::Core::joint_c() );
-    rvljoint->id = id;
-
-    //printf( "joint[%s] AngleCount: %u\n", id.c_str(), gzjoint->GetAngleCount() );
-    assert( gzjoint->GetAngleCount() <= 3 );  // Sanity check number of angles
-
-    for( unsigned j = 0; j < gzjoint->GetAngleCount(); j++ ) {
-      // -States-
-      rvljoint->state.q( j, gzjoint->GetAngle( j ).Radian() );
-      rvljoint->state.dq( j, gzjoint->GetVelocity( j ) );
-
-      // -Controls-
-      // assume it is mapped
-      //bool mapped = true;
-      std::stringstream key;
-      key << id << "&" << j;
-
-      // assume a zero control
-      double u = 0;
-      try{
-        // try to get the value stored in the map
-        u = control.at( key.str() );
-      } catch( std::exception ex ) {
-        // if the map failed to return a reference, then the joint is not mapped
-        //mapped = false;
-      }
-
-      // skip this joint if it is not mapped
-      //if( !mapped ) continue;
-
-      rvljoint->control[j] = u;
-    }
-  
-    // insert the joint into the reveal model
-    rvlmodel->insert( rvljoint );
-  }
-
-  // return the reveal model
-  return rvlmodel;
-*/
 }
 
 //-----------------------------------------------------------------------------
@@ -285,92 +203,6 @@ Reveal::Core::model_ptr helpers_c::read_model( gazebo::physics::WorldPtr world, 
 // std::err
 // returns an empty pointer if it fails to find the model in the gazebo world
 Reveal::Core::model_ptr helpers_c::read_model( gazebo::physics::WorldPtr world, std::string model_name ) {
-/*
-  //printf( "reading model\n" );
-
-  // TODO: similar to the adjustment in write model, read model needs a filter
-  // that indicates what components (and only those that) should be recorded.
-  // for data generation, the filter is provided by the plugin designer but for
-  // the Reveal system, the filter is provided by the model created when the 
-  // trial was received.  What we don't want is what we have here and that is
-  // arbitrarily reading the whole model.
-
-  Reveal::Core::model_ptr rvlmodel;
-  gazebo::physics::ModelPtr gzmodel = world->GetModel( model_name );
-
-  // if gazebo could not find the model, return a reveal model null reference
-  if( !gzmodel ) return rvlmodel;
-  
-  // otherwise, start mapping the model
-  rvlmodel = Reveal::Core::model_ptr( new Reveal::Core::model_c() );
-  rvlmodel->id = model_name;
-
-  // iterate through the filter and grab only the values defined by the filter 
-  for( unsigned i = 0; i < filter->links.size(); i++ ) {
-    Reveal::Core::link_ptr flink = filter->links[i];
-    Reveal::Core::link_ptr rvllink( new Reveal::Core::link_c() );
-
-    // get the relevant gazebo structure by using the filter's identifier
-    gazebo::physics::LinkPtr gzlink = gzmodel->GetLink( flink->id );
-
-    if( !gzlink ) continue;  // identifiers don't align.  big problem
-
-    // get the representative parameters
-    rvllink->id = gzlink->GetName();
-    pose( gzlink->GetWorldPose(), rvllink->state );
-    linear_velocity( gzlink->GetWorldLinearVel(), rvllink->state );
-    angular_velocity( gzlink->GetWorldAngularVel(), rvllink->state );
-
-    // insert the link into the reveal model
-    rvlmodel->insert( rvllink );
-  }
-  for( unsigned i = 0; i < filter->joints.size(); i++ ) {
-    Reveal::Core::joint_ptr fjoint = filter->joints[i];
-    Reveal::Core::joint_ptr rvljoint( new Reveal::Core::joint_c() );
-
-    // get the relevant gazebo structure by using the filter's identifier
-    gazebo::physics::JointPtr gzjoint = gzmodel->GetJoint( fjoint->id );
-    
-    if( !gzjoint ) continue;  // identifiers don't align.  big problem
-
-    rvljoint->id = gzjoint->GetName();
-    rvljoint->state.resize( gzjoint->GetAngleCount() );
-    rvljoint->control.resize( gzjoint->GetAngleCount() );
-    
-    for( unsigned j = 0; j < gzjoint->GetAngleCount(); j++ ) {
-      // -States-
-      rvljoint->state.q( j, gzjoint->GetAngle( j ).Radian() );
-      rvljoint->state.dq( j, gzjoint->GetVelocity( j ) );
-
-      // -Controls-
-      // assume it is mapped
-      //bool mapped = true;
-      std::stringstream key;
-      key << rvljoint->id << "&" << j;
-
-      // assume a zero control
-      double u = 0;
-      try{
-        // try to get the value stored in the map
-        u = control.at( key.str() );
-      } catch( std::exception ex ) {
-        // if the map failed to return a reference, then the joint is not mapped
-        //mapped = false;
-      }
-
-      // skip this joint if it is not mapped
-      //if( !mapped ) continue;
-
-      rvljoint->control[j] = u;
-    }
-  
-    // insert the joint into the reveal model
-    rvlmodel->insert( rvljoint );
-  }
-
-  // return the reveal model
-  return rvlmodel;
-*/
   Reveal::Core::model_ptr rvlmodel;
   // attempt to find the model in the gazebo world
   gazebo::physics::ModelPtr gzmodel = world->GetModel( model_name );
@@ -379,8 +211,7 @@ Reveal::Core::model_ptr helpers_c::read_model( gazebo::physics::WorldPtr world, 
   if( !gzmodel ) return rvlmodel;
 
   // otherwise, start mapping the model
-  rvlmodel = Reveal::Core::model_ptr( new Reveal::Core::model_c() );
-  rvlmodel->id = model_name;
+  rvlmodel = Reveal::Core::model_ptr( new Reveal::Core::model_c( model_name ) );
 
   //printf( "reading links\n" );
   // get all the links in the gazebo model and iterate through them

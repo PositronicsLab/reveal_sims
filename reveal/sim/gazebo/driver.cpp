@@ -276,10 +276,17 @@ bool execute( Reveal::Core::authorization_ptr auth, Reveal::Core::scenario_ptr s
 
     printf( "dynamics: %s\n", dynamics_param.c_str() );
 
+    bool start_paused = false;  
+    // NOTE: if start_paused enabled the simulator will start in a paused state
+    // It is very useful to start_paused in debugging scenarios as gzclient
+    // can be connected to gzserver and the scenario can be visualized.
+    // TODO: either expose start_paused in some command line interface OR
+    // add a command line option to attach gzclient to the process to visualize
+
     // build the make command line arguments array
     std::vector<std::string> arg_strings;
     arg_strings.push_back( "reveal-gzserver" );
-    //arg_strings.push_back( "-u" );  // paused    TODO: remark after debugging
+    if( start_paused ) arg_strings.push_back( "-u" );  
     arg_strings.push_back( "-e" );
     arg_strings.push_back( dynamics_param );
     arg_strings.push_back( "--verbose" ); 
